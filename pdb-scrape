@@ -5,6 +5,10 @@ import urllib.request
 from pathlib import Path
 
 import molparse as mp
+from molparse.residue import silence_unknown_res_warning
+silence_unknown_res_warning()
+
+from tqdm import tqdm
 
 import mcol
 from mlog import setup_logger
@@ -40,31 +44,28 @@ def read_pdb_codes(
 
 def download_pdb(
     code: str, 
-    out_dir: Path
 ) -> Path:
 
-    out_file = out_dir/f'{code}_rcsb.pdb'
-    logger.writing(out_file)
+    out_file = OUTPUT_DIR/f'{code}_rcsb.pdb'
+    # logger.writing(out_file)
     urllib.request.urlretrieve(f'{RCSB_PDB_DOWNLOAD_URL}/{code}.pdb', out_file)
     return out_file
 
 def download_mtz(
     code: str, 
-    out_dir: Path
 ) -> Path:
 
-    out_file = out_dir/f'{code}.mtz'
-    logger.writing(out_file)
+    out_file = OUTPUT_DIR/f'{code}.mtz'
+    # logger.writing(out_file)
     urllib.request.urlretrieve(f'{RCSB_MTZ_DOWNLOAD_URL}/{code}.mtz', out_file)
     return out_file
 
 def download_cif(
     code: str, 
-    out_dir: Path
 ) -> Path:
 
-    out_file = out_dir/f'{code}_rcsb.cif'
-    logger.writing(out_file)
+    out_file = OUTPUT_DIR/f'{code}_rcsb.cif'
+    # logger.writing(out_file)
     urllib.request.urlretrieve(f'{RCSB_CIF_DOWNLOAD_URL}/{code}.cif', out_file)
     return out_file
 
@@ -75,33 +76,32 @@ def clean_pdb(
 
     out_file = str(in_file).replace('_rcsb.pdb', '.pdb')
 
-    sys = mp.parse(in_file, keep_headers=True)
-
-    # if remove_heterogens:
-    #   sys.remove_heterogens()
+    sys = mp.parse(in_file, keep_headers=True, verbosity=0)
 
     if REMOVE_RESIDUES:
-        sys.remove_residues(names=REMOVE_RESIDUES.split())
+        sys.remove_residues(names=REMOVE_RESIDUES.split(), verbosity=0)
 
     lig_code = extract_ligand_code(sys)
 
     assert lig_code
 
-    sys.rename_residues(lig_code, 'LIG')
+    sys.rename_residues(lig_code, 'LIG', verbosity=0)
 
-    mp.write(out_file, sys)
+    # logger.writing(out_file)
+    mp.write(out_file, sys, verbosity=0)
 
     return lig_code
 
 def clean_cif(
     in_file: Path,
     lig_code: str,
+    pdb_code: str,
 ) -> None:
 
-    out_file = str(in_file).replace('_rcsb.cif', '.cif')
+    out_file = OUTPUT_DIR/f'{pdb_code}.cif'
     buffer = in_file.read_text()
     buffer = buffer.replace(lig_code, 'LIG')
-    logger.writing(out_file)
+    # logger.writing(out_file)
     with open(out_file,'wt') as f:
         f.write(buffer)
 
@@ -131,6 +131,7 @@ def parse_args():
     parser.add_argument("-f", '--force', action='store_true', help="don't warn when overwriting data")
     parser.add_argument("-r", '--remove', help=f"space-delimited list of residue names to ignore/remove (defaults to '{REMOVE_RESIDUES}'')")
     parser.add_argument("-c", '--clean', action='store_true', help=f"clean up original RCSB files")
+    parser.add_argument("-co", '--clean-only', action='store_true', help=f"Do not run scraper but only clean up original RCSB files")
 
     return parser.parse_args()
 
@@ -142,52 +143,73 @@ def main():
     args = parse_args()
 
     PDB_CODE_FILE = args.pdb_code_file
-    OUTPUT_DIR = args.output or OUTPUT_DIR
     REMOVE_RESIDUES = args.output or REMOVE_RESIDUES
+    OUTPUT_DIR = args.output or OUTPUT_DIR
+    OUTPUT_DIR = Path(OUTPUT_DIR)
 
     logger.var("PDB_CODE_FILE", PDB_CODE_FILE)
     logger.var("OUTPUT_DIR", OUTPUT_DIR)
     logger.var("REMOVE_RESIDUES", REMOVE_RESIDUES)
 
-    # read PDB codes
-    codes = read_pdb_codes(PDB_CODE_FILE)
+    if not args.clean_only:
 
-    if not codes:
-        return
+        # read PDB codes
+        codes = read_pdb_codes(PDB_CODE_FILE)
 
-    out_dir = Path(OUTPUT_DIR)
-    logger.writing(out_dir)
-    
-    try:
-        out_dir.mkdir(parents=True, exist_ok=False)
-    
-    except FileExistsError:
+        if not codes:
+            return
 
-        if not args.force:
-            
-            logger.warning(f'Would overwrite existing directory {out_dir}')
+        # logger.writing(OUTPUT_DIR)
         
-            try:
-                input(f"{mcol.bold}Press any key to continue, or CTRL-C to abort{mcol.clear}")
+        try:
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=False)
+        
+        except FileExistsError:
+
+            if not args.force:
+                
+                logger.warning(f'Would overwrite existing directory {OUTPUT_DIR}')
             
-            except KeyboardInterrupt:
-                print()
-                exit()
+                try:
+                    input(f"{mcol.bold}Press any key to continue, or CTRL-C to abort{mcol.clear}")
+                
+                except KeyboardInterrupt:
+                    print()
+                    exit()
 
-        for child in out_dir.iterdir():
-            if child.is_file():
-                child.unlink()
+            for child in OUTPUT_DIR.iterdir():
+                if child.is_file():
+                    child.unlink()
 
-    for code in codes:
-        logger.title(code)
-        pdb_file = download_pdb(code, out_dir)
-        mtz_file = download_mtz(code, out_dir)
-        lig_code = clean_pdb(pdb_file)
-        cif_file = download_cif(lig_code, out_dir)
-        clean_cif(cif_file, lig_code)
+    with tqdm(total=len(codes), colour='yellow', bar_format=r'{l_bar}{bar}| {n:.0f}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]') as pbar:
 
-    if args.clean:
-        for child in out_dir.iterdir():
+        for code in codes:
+
+            pbar.set_postfix_str(code)
+            
+            pdb_file = download_pdb(code)
+            pbar.update(0.19999999)
+
+            mtz_file = download_mtz(code)
+            pbar.update(0.19999999)
+            
+            lig_code = clean_pdb(pdb_file)
+            pbar.update(0.19999999)
+            
+            cif_file = download_cif(lig_code)
+            pbar.update(0.19999999)
+            
+            clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
+            pbar.update(0.19999999)
+            
+            tqdm.write(f'{mcol.success}{mcol.inverse} SUCCESS {mcol.uninverse} {code} OK!{mcol.clear}')
+            # logger.success(f'{code} OK')
+        
+        pbar.set_postfix_str('COMPLETE')
+
+    if args.clean or args.clean_only:
+        logger.info('Cleaning up...')
+        for child in OUTPUT_DIR.iterdir():
             if child.is_file():
                 if '_rcsb' in str(child):
                     child.unlink()
