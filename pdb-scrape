@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import os
-import urllib.request
+import urllib
 from pathlib import Path
 
 import molparse as mp
@@ -47,8 +47,8 @@ def download_pdb(
 ) -> Path:
 
     out_file = OUTPUT_DIR/f'{code}_rcsb.pdb'
-    # logger.writing(out_file)
-    urllib.request.urlretrieve(f'{RCSB_PDB_DOWNLOAD_URL}/{code}.pdb', out_file)
+    if not Path(out_file).exists():
+        urllib.request.urlretrieve(f'{RCSB_PDB_DOWNLOAD_URL}/{code}.pdb', out_file)
     return out_file
 
 def download_mtz(
@@ -56,8 +56,8 @@ def download_mtz(
 ) -> Path:
 
     out_file = OUTPUT_DIR/f'{code}.mtz'
-    # logger.writing(out_file)
-    urllib.request.urlretrieve(f'{RCSB_MTZ_DOWNLOAD_URL}/{code}.mtz', out_file)
+    if not Path(out_file).exists():
+        urllib.request.urlretrieve(f'{RCSB_MTZ_DOWNLOAD_URL}/{code}.mtz', out_file)
     return out_file
 
 def download_cif(
@@ -65,8 +65,8 @@ def download_cif(
 ) -> Path:
 
     out_file = OUTPUT_DIR/f'{code}_rcsb.cif'
-    # logger.writing(out_file)
-    urllib.request.urlretrieve(f'{RCSB_CIF_DOWNLOAD_URL}/{code}.cif', out_file)
+    if not Path(out_file).exists():
+        urllib.request.urlretrieve(f'{RCSB_CIF_DOWNLOAD_URL}/{code}.cif', out_file)
     return out_file
 
 def clean_pdb(
@@ -111,9 +111,9 @@ def extract_ligand_code(
 
     hetnam_lines = [s for s in sys._header_data if s.startswith('HETNAM')]
 
-    lig_codes = [l.split()[1] for l in hetnam_lines]
+    lig_codes = [l[11:].split()[0] for l in hetnam_lines]
 
-    lig_codes = [c for c in lig_codes if c not in REMOVE_RESIDUES.split()]
+    lig_codes = list(set([c for c in lig_codes if c not in REMOVE_RESIDUES.split()]))
 
     if len(lig_codes) != 1:
         logger.error(f'Multiple candidate ligands: {lig_codes}')
@@ -128,7 +128,7 @@ def parse_args():
 
     parser.add_argument("pdb_code_file", help='Text file containing PDB codes on separate lines')
     parser.add_argument("-o", '--output', help=f"output directory/path (defaults to {OUTPUT_DIR})")
-    parser.add_argument("-f", '--force', action='store_true', help="don't warn when overwriting data")
+    # parser.add_argument("-f", '--force', action='store_true', help="don't warn when overwriting data")
     parser.add_argument("-r", '--remove', help=f"space-delimited list of residue names to ignore/remove (defaults to '{REMOVE_RESIDUES}'')")
     parser.add_argument("-c", '--clean', action='store_true', help=f"clean up original RCSB files")
     parser.add_argument("-co", '--clean-only', action='store_true', help=f"Do not run scraper but only clean up original RCSB files")
@@ -143,7 +143,7 @@ def main():
     args = parse_args()
 
     PDB_CODE_FILE = args.pdb_code_file
-    REMOVE_RESIDUES = args.output or REMOVE_RESIDUES
+    REMOVE_RESIDUES = args.remove or REMOVE_RESIDUES
     OUTPUT_DIR = args.output or OUTPUT_DIR
     OUTPUT_DIR = Path(OUTPUT_DIR)
 
@@ -158,47 +158,36 @@ def main():
 
         if not codes:
             return
-
-        # logger.writing(OUTPUT_DIR)
         
         try:
             OUTPUT_DIR.mkdir(parents=True, exist_ok=False)
         
-        except FileExistsError:
-
-            if not args.force:
-                
-                logger.warning(f'Would overwrite existing directory {OUTPUT_DIR}')
+        except FileExistsError:                
+            logger.warning(f'Using existing RCSB downloads in {OUTPUT_DIR}')
             
-                try:
-                    input(f"{mcol.bold}Press any key to continue, or CTRL-C to abort{mcol.clear}")
-                
-                except KeyboardInterrupt:
-                    print()
-                    exit()
-
-            for child in OUTPUT_DIR.iterdir():
-                if child.is_file():
-                    child.unlink()
-
     with tqdm(total=len(codes), colour='yellow', bar_format=r'{l_bar}{bar}| {n:.0f}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]') as pbar:
 
         for code in codes:
 
             pbar.set_postfix_str(code)
             
-            pdb_file = download_pdb(code)
-            pbar.update(0.19999999)
+            try:
+                pdb_file = download_pdb(code)
+                pbar.update(0.19999999)
 
-            mtz_file = download_mtz(code)
-            pbar.update(0.19999999)
-            
-            lig_code = clean_pdb(pdb_file)
-            pbar.update(0.19999999)
-            
-            cif_file = download_cif(lig_code)
-            pbar.update(0.19999999)
-            
+                mtz_file = download_mtz(code)
+                pbar.update(0.19999999)
+                
+                lig_code = clean_pdb(pdb_file)
+                pbar.update(0.19999999)
+                
+                cif_file = download_cif(lig_code)
+                pbar.update(0.19999999)
+
+            except urllib.error.HTTPError as e:
+                tqdm.write(f'{mcol.error}{mcol.inverse} ERROR {mcol.uninverse} {mcol.underline}{code}{mcol.ununderline} {e} {mcol.clear}')
+                continue
+
             clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
             pbar.update(0.19999999)
             
@@ -213,6 +202,11 @@ def main():
             if child.is_file():
                 if '_rcsb' in str(child):
                     child.unlink()
+
+    import os
+    logger.info('Zipping...')
+    os.system(f'zip {OUTPUT_DIR}/{OUTPUT_DIR.name}.zip {OUTPUT_DIR}/????.pdb {OUTPUT_DIR}/????.mtz {OUTPUT_DIR}/????.cif')
+    logger.success('Done')
 
 if __name__ == '__main__':
     main()
