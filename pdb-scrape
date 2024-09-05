@@ -15,7 +15,8 @@ from mlog import setup_logger
 logger = setup_logger('PdbScraper')
 
 OUTPUT_DIR='output'
-REMOVE_RESIDUES = "EDO MPD DMS PEG ETG PO4"
+IGNORE_RESIDUES = "ZN EDO MPD DMS PEG ETG PO4"
+REMOVE_RESIDUES = ""
 
 RCSB_PDB_DOWNLOAD_URL = 'http://files.rcsb.org/download/'
 RCSB_MTZ_DOWNLOAD_URL = 'http://edmaps.rcsb.org/coefficients/'
@@ -115,10 +116,15 @@ def extract_ligand_code(
 
     lig_codes = [l[11:].split()[0] for l in hetnam_lines]
 
-    lig_codes = list(set([c for c in lig_codes if c not in REMOVE_RESIDUES.split()]))
+    if IGNORE_RESIDUES:
+        ignore = IGNORE_RESIDUES.split()
+    else:
+        ignore = []
+
+    lig_codes = list(set([c for c in lig_codes if c not in ignore]))
 
     if len(lig_codes) != 1:
-        logger.error(f'Multiple candidate ligands: {lig_codes}')
+        logger.error(f'Multiple candidate ligands: {lig_codes}. Try setting the --ignore parameter')
         return None
 
     return lig_codes[0]
@@ -130,8 +136,8 @@ def parse_args():
 
     parser.add_argument("pdb_code_file", help='Text file containing PDB codes on separate lines')
     parser.add_argument("-o", '--output', help=f"output directory/path (defaults to {OUTPUT_DIR})")
-    # parser.add_argument("-f", '--force', action='store_true', help="don't warn when overwriting data")
-    parser.add_argument("-r", '--remove', help=f"space-delimited list of residue names to ignore/remove (defaults to '{REMOVE_RESIDUES}'')")
+    parser.add_argument("-r", '--remove', help=f"space-delimited list of residue names to remove from PDBs (defaults to '{REMOVE_RESIDUES}'')")
+    parser.add_argument("-i", '--ignore', help=f"space-delimited list of residue names to ignore when picking the ligand (defaults to '{IGNORE_RESIDUES}'')")
     parser.add_argument("-c", '--clean', action='store_true', help=f"clean up original RCSB files")
     parser.add_argument("-co", '--clean-only', action='store_true', help=f"Do not run scraper but only clean up original RCSB files")
 
@@ -139,19 +145,20 @@ def parse_args():
 
 def main():
 
-    global OUTPUT_DIR
-    global REMOVE_RESIDUES
+    global OUTPUT_DIR, REMOVE_RESIDUES, IGNORE_RESIDUES
 
     args = parse_args()
 
     PDB_CODE_FILE = args.pdb_code_file
     REMOVE_RESIDUES = args.remove or REMOVE_RESIDUES
+    IGNORE_RESIDUES = args.ignore or IGNORE_RESIDUES
     OUTPUT_DIR = args.output or OUTPUT_DIR
     OUTPUT_DIR = Path(OUTPUT_DIR)
 
     logger.var("PDB_CODE_FILE", PDB_CODE_FILE)
     logger.var("OUTPUT_DIR", OUTPUT_DIR)
     logger.var("REMOVE_RESIDUES", REMOVE_RESIDUES)
+    logger.var("IGNORE_RESIDUES", IGNORE_RESIDUES)
 
     if not args.clean_only:
 
@@ -194,7 +201,6 @@ def main():
             pbar.update(0.19999999)
             
             tqdm.write(f'{mcol.success}{mcol.inverse} SUCCESS {mcol.uninverse} {code} OK!{mcol.clear}')
-            # logger.success(f'{code} OK')
         
         pbar.set_postfix_str('COMPLETE')
 
