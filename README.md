@@ -26,4 +26,4 @@ Fetches necessary files from the protein data bank for collation and alignment w
 
 2. Install pre-requisites
 
-`pip install molparse`
+`pip install molparse tqdm`
