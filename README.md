@@ -26,4 +26,8 @@ Fetches necessary files from the protein data bank for collation and alignment w
 
 2. Install pre-requisites
 
-`pip install molparse tqdm`
+`pip install --upgrade molparse tqdm`
+
+3. Create an environment variable to point to the directory (best to put it in your bash_profile or bashrc)
+
+`export PDB_SCRAPE=/path/to/pdb-scrape`
