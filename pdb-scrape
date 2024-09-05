@@ -35,7 +35,9 @@ def read_pdb_codes(
     codes = []
     with open(file, 'rt') as f:
         for line in f:
-            codes.append(line.strip().lower())
+            s = line.strip().lower()
+            if s:
+                codes.append(s)
 
     if not codes:
         logger.error(f'Could not read any PDB codes from {PDB_CODE_FILE}')
@@ -164,7 +166,7 @@ def main():
         
         except FileExistsError:                
             logger.warning(f'Using existing RCSB downloads in {OUTPUT_DIR}')
-            
+
     with tqdm(total=len(codes), colour='yellow', bar_format=r'{l_bar}{bar}| {n:.0f}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]') as pbar:
 
         for code in codes:
