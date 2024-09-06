@@ -127,11 +127,12 @@ def check_cif(cif_file, sys):
 
         if len(grp_cif.atoms) != len(res.atoms):
             matching = False
-        else:
-            try:
-                mol_pdb = AllChem.AssignBondOrdersFromTemplate(mol_cif, mol_pdb)
-            except ValueError:
-                matching = False
+            
+        # else:
+        #     try:
+        #         mol_pdb = AllChem.AssignBondOrdersFromTemplate(mol_cif, mol_pdb)
+        #     except ValueError:
+        #         matching = False
 
         if not matching:
             tqdm.write(f'{mcol.warning}{mcol.bold}{mcol.inverse} Warning {mcol.uninverse}{mcol.unbold} {mcol.underline}{cif_file}{mcol.ununderline} PDB ligand ({res.name} {res.number}) does not match CIF {mcol.clear}')
