@@ -125,9 +125,12 @@ def check_cif(cif_file, sys):
         
         mol_pdb = res.rdkit_mol
 
+        if mol_pdb is None:
+            raise ValueError('Could not create PDB ligand')
+
         if len(grp_cif.atoms) != len(res.atoms):
             matching = False
-            
+
         # else:
         #     try:
         #         mol_pdb = AllChem.AssignBondOrdersFromTemplate(mol_cif, mol_pdb)
@@ -255,7 +258,11 @@ def main():
             cif_file = clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
             pbar.update(0.19999999)
 
-            matching = check_cif(cif_file, sys)
+            try:
+                matching = check_cif(cif_file, sys)
+            except ValueError as e:
+                tqdm.write(f'{mcol.error}{mcol.inverse} ERROR {mcol.uninverse} {code} {e}!{mcol.clear}')
+                continue
             
             if matching:
                 tqdm.write(f'{mcol.success}{mcol.inverse} SUCCESS {mcol.uninverse} {code} OK!{mcol.clear}')
