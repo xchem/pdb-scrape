@@ -93,13 +93,13 @@ def clean_pdb(
     # logger.writing(out_file)
     mp.write(out_file, sys, verbosity=0)
 
-    return lig_code
+    return lig_code, sys
 
 def clean_cif(
     in_file: Path,
     lig_code: str,
     pdb_code: str,
-) -> None:
+) -> Path:
 
     out_file = OUTPUT_DIR/f'{pdb_code}.cif'
     buffer = in_file.read_text()
@@ -107,6 +107,59 @@ def clean_cif(
     # logger.writing(out_file)
     with open(out_file,'wt') as f:
         f.write(buffer)
+    return out_file
+
+def check_cif(cif_file, sys):
+
+    from rdkit.Chem import AllChem
+
+    mol_cif = mp.rdkit.mol_from_cif(cif_file)
+
+    grp_cif = mp.rdkit.mol_to_AtomGroup(mol_cif)
+    
+    matching = True
+
+    lig_res = sys.residues['LIG']
+
+    for res in lig_res:
+        
+        mol_pdb = res.rdkit_mol
+
+        if len(grp_cif.atoms) != len(res.atoms):
+            matching = False
+        else:
+            try:
+                mol_pdb = AllChem.AssignBondOrdersFromTemplate(mol_cif, mol_pdb)
+            except ValueError:
+                matching = False
+
+        if not matching:
+            tqdm.write(f'{mcol.warning}{mcol.bold}{mcol.inverse} Warning {mcol.uninverse}{mcol.unbold} {mcol.underline}{cif_file}{mcol.ununderline} PDB ligand ({res.name} {res.number}) does not match CIF {mcol.clear}')
+
+            from molparse.rdkit import compare_mols
+
+            diff1, diff2 = compare_mols(mol_cif, mol_pdb, names=['CIF', 'PDB'], ignore_hydrogen=True)
+
+            if diff1:
+                tqdm.write(f'PDB is missing {diff1}, will try to remove')
+            if diff2:
+                tqdm.write(f'{mcol.error}{mcol.bold}{mcol.inverse} ERROR {mcol.uninverse}{mcol.unbold} {mcol.underline}{cif_file}{mcol.ununderline} is missing {diff2}, cannot remove {mcol.clear}')
+
+    if not matching:
+        if len(lig_res) > 1:
+            tqdm.write(f'{mcol.warning}{mcol.bold}{mcol.inverse} Warning {mcol.uninverse}{mcol.unbold} {mcol.underline}{cif_file}{mcol.ununderline} CIF modification may fail with multiple residues {mcol.clear}')
+        
+        elif diff1:
+
+            from molparse.io import modifyCIF
+
+            out_file = str(cif_file).replace('.cif', '_mod.cif')
+            modifyCIF(cif_file, out_file, remove_atomtypes=list(diff1.keys()))
+            tqdm.write(f'{mcol.file}{mcol.bold}{mcol.inverse} DISK {mcol.uninverse}{mcol.unbold} modified cif file: {mcol.underline}{out_file}{mcol.clear}')
+            tqdm.write(f'{mcol.warning}{mcol.bold}{mcol.inverse} Warning {mcol.uninverse}{mcol.unbold} {mcol.underline}{out_file}{mcol.ununderline} metadata unmodified {mcol.clear}')
+
+    return matching
+
 
 def extract_ligand_code(
     sys: mp.System,
@@ -187,20 +240,26 @@ def main():
                 mtz_file = download_mtz(code)
                 pbar.update(0.19999999)
                 
-                lig_code = clean_pdb(pdb_file)
+                lig_code, sys = clean_pdb(pdb_file)
                 pbar.update(0.19999999)
                 
                 cif_file = download_cif(lig_code)
                 pbar.update(0.19999999)
 
+
             except urllib.error.HTTPError as e:
                 tqdm.write(f'{mcol.error}{mcol.inverse} ERROR {mcol.uninverse} {mcol.underline}{code}{mcol.ununderline} {e} {mcol.clear}')
                 continue
 
-            clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
+            cif_file = clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
             pbar.update(0.19999999)
+
+            matching = check_cif(cif_file, sys)
             
-            tqdm.write(f'{mcol.success}{mcol.inverse} SUCCESS {mcol.uninverse} {code} OK!{mcol.clear}')
+            if matching:
+                tqdm.write(f'{mcol.success}{mcol.inverse} SUCCESS {mcol.uninverse} {code} OK!{mcol.clear}')
+            else:
+                tqdm.write(f'{mcol.error}{mcol.inverse} ERROR {mcol.uninverse} {code} cif /= pdb !{mcol.clear}')
         
         pbar.set_postfix_str('COMPLETE')
 
@@ -213,7 +272,7 @@ def main():
 
     import os
     logger.info('Zipping...')
-    os.system(f'zip {OUTPUT_DIR}/{OUTPUT_DIR.name}.zip {OUTPUT_DIR}/????.pdb {OUTPUT_DIR}/????.mtz {OUTPUT_DIR}/????.cif')
+    os.system(f'zip {OUTPUT_DIR}/{OUTPUT_DIR.name}.zip {OUTPUT_DIR}/????.pdb {OUTPUT_DIR}/????.mtz {OUTPUT_DIR}/????.cif {OUTPUT_DIR}/????_mod.cif')
     logger.success('Done')
 
 if __name__ == '__main__':
