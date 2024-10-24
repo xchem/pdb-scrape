@@ -15,7 +15,7 @@ from mlog import setup_logger
 logger = setup_logger('PdbScraper')
 
 OUTPUT_DIR='output'
-IGNORE_RESIDUES = "ZN EDO MPD DMS PEG ETG PO4"
+IGNORE_RESIDUES = "EDO MPD DMS PEG ETG PO4 SO4 GOL TCE MES EPE TRS CL K MG NA NI CA ZN"
 REMOVE_RESIDUES = ""
 
 RCSB_PDB_DOWNLOAD_URL = 'http://files.rcsb.org/download/'
