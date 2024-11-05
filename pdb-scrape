@@ -8,11 +8,9 @@ import molparse as mp
 from molparse.residue import silence_unknown_res_warning
 silence_unknown_res_warning()
 
-from tqdm import tqdm
-
 import mcol
-from mlog import setup_logger
-logger = setup_logger('PdbScraper')
+
+import mrich as logger
 
 OUTPUT_DIR='output'
 IGNORE_RESIDUES = "ZN EDO MPD DMS PEG ETG PO4"
@@ -60,7 +58,12 @@ def download_mtz(
 
     out_file = OUTPUT_DIR/f'{code}.mtz'
     if not Path(out_file).exists():
-        urllib.request.urlretrieve(f'{RCSB_MTZ_DOWNLOAD_URL}/{code}.mtz', out_file)
+        try:
+            urllib.request.urlretrieve(f'{RCSB_MTZ_DOWNLOAD_URL}/{code}.mtz', out_file)
+        except urllib.error.URLError as e:
+            logger.warning(f"Can't retrieve MTZ for {code}")
+            return None
+
     return out_file
 
 def download_cif(
@@ -85,8 +88,6 @@ def clean_pdb(
         sys.remove_residues(names=REMOVE_RESIDUES.split(), verbosity=0)
 
     lig_code = extract_ligand_code(sys)
-
-    assert lig_code
 
     sys.rename_residues(lig_code, 'LIG', verbosity=0)
 
@@ -113,7 +114,11 @@ def check_cif(cif_file, sys):
 
     from rdkit.Chem import AllChem
 
-    mol_cif = mp.rdkit.mol_from_cif(cif_file)
+    try:
+        mol_cif = mp.rdkit.mol_from_cif(cif_file)
+    except Exception as e:
+        logger.error("Could not create rdkit.Chem.Mol from", cif_file)
+        return False
 
     grp_cif = mp.rdkit.mol_to_AtomGroup(mol_cif)
     
@@ -126,32 +131,26 @@ def check_cif(cif_file, sys):
         mol_pdb = res.rdkit_mol
 
         if mol_pdb is None:
-            raise ValueError('Could not create PDB ligand')
+            raise MolInstantiationError('Could not create PDB ligand')
 
         if len(grp_cif.atoms) != len(res.atoms):
             matching = False
 
-        # else:
-        #     try:
-        #         mol_pdb = AllChem.AssignBondOrdersFromTemplate(mol_cif, mol_pdb)
-        #     except ValueError:
-        #         matching = False
-
         if not matching:
-            tqdm.write(f'{mcol.warning}{mcol.bold}{mcol.inverse} Warning {mcol.uninverse}{mcol.unbold} {mcol.underline}{cif_file}{mcol.ununderline} PDB ligand ({res.name} {res.number}) does not match CIF {mcol.clear}')
+            logger.warning(cif_file, f"PDB ligand ({res.name} {res.number}) does not match CIF")
 
             from molparse.rdkit import compare_mols
 
             diff1, diff2 = compare_mols(mol_cif, mol_pdb, names=['CIF', 'PDB'], ignore_hydrogen=True)
 
             if diff1:
-                tqdm.write(f'PDB is missing {diff1}, will try to remove')
+                logger.print(f'PDB is missing {diff1}, will try to remove')
             if diff2:
-                tqdm.write(f'{mcol.error}{mcol.bold}{mcol.inverse} ERROR {mcol.uninverse}{mcol.unbold} {mcol.underline}{cif_file}{mcol.ununderline} is missing {diff2}, cannot remove {mcol.clear}')
+                logger.error(cif_file, f"is missing {diff2}, cannot remove")
 
     if not matching:
         if len(lig_res) > 1:
-            tqdm.write(f'{mcol.warning}{mcol.bold}{mcol.inverse} Warning {mcol.uninverse}{mcol.unbold} {mcol.underline}{cif_file}{mcol.ununderline} CIF modification may fail with multiple residues {mcol.clear}')
+            logger.warning(cif_file, "CIF modification may fail with multiple residues")
         
         elif diff1:
 
@@ -159,8 +158,8 @@ def check_cif(cif_file, sys):
 
             out_file = str(cif_file).replace('.cif', '_mod.cif')
             modifyCIF(cif_file, out_file, remove_atomtypes=list(diff1.keys()))
-            tqdm.write(f'{mcol.file}{mcol.bold}{mcol.inverse} DISK {mcol.uninverse}{mcol.unbold} modified cif file: {mcol.underline}{out_file}{mcol.clear}')
-            tqdm.write(f'{mcol.warning}{mcol.bold}{mcol.inverse} Warning {mcol.uninverse}{mcol.unbold} {mcol.underline}{out_file}{mcol.ununderline} metadata unmodified {mcol.clear}')
+            logger.writing(out_file)
+            logger.warning(out_file, "metadata unmodified")
 
     return matching
 
@@ -171,18 +170,23 @@ def extract_ligand_code(
 
     hetnam_lines = [s for s in sys._header_data if s.startswith('HETNAM')]
 
-    lig_codes = [l[11:].split()[0] for l in hetnam_lines]
+    all_lig_codes = [l[11:].split()[0] for l in hetnam_lines]
 
     if IGNORE_RESIDUES:
         ignore = IGNORE_RESIDUES.split()
     else:
         ignore = []
 
-    lig_codes = list(set([c for c in lig_codes if c not in ignore]))
+    lig_codes = list(set([c for c in all_lig_codes if c not in ignore]))
 
-    if len(lig_codes) != 1:
+    if len(lig_codes) > 1:
         logger.error(f'Multiple candidate ligands: {lig_codes}. Try setting the --ignore parameter')
-        return None
+        raise ValueError(f'Multiple candidate ligands: {lig_codes}. Try setting the --ignore parameter')
+    elif not lig_codes:
+        logger.error(f'No non-ignored candidate ligands: {all_lig_codes}. Try changing the --ignore parameter')
+        logger.var("all_lig_codes", all_lig_codes)
+        logger.var("ignore", ignore)
+        raise ValueError(f'No non-ignored candidate ligands: {all_lig_codes}. Try changing the --ignore parameter')
 
     return lig_codes[0]
 
@@ -193,12 +197,17 @@ def parse_args():
 
     parser.add_argument("pdb_code_file", help='Text file containing PDB codes on separate lines')
     parser.add_argument("-o", '--output', help=f"output directory/path (defaults to {OUTPUT_DIR})")
-    parser.add_argument("-r", '--remove', help=f"space-delimited list of residue names to remove from PDBs (defaults to '{REMOVE_RESIDUES}'')")
-    parser.add_argument("-i", '--ignore', help=f"space-delimited list of residue names to ignore when picking the ligand (defaults to '{IGNORE_RESIDUES}'')")
+    parser.add_argument("-r", '--remove', help=f"space-delimited list of residue names to remove from PDBs (defaults to '{REMOVE_RESIDUES}')")
+    parser.add_argument("-i", '--ignore', help=f"space-delimited list of residue names to ignore when picking the ligand (defaults to '{IGNORE_RESIDUES}')")
+    parser.add_argument("-m", '--mtz', help=f"fetch MTZ files)")
     parser.add_argument("-c", '--clean', action='store_true', help=f"clean up original RCSB files")
     parser.add_argument("-co", '--clean-only', action='store_true', help=f"Do not run scraper but only clean up original RCSB files")
 
     return parser.parse_args()
+
+class MolInstantiationError(Exception):
+    ...
+
 
 def main():
 
@@ -231,56 +240,45 @@ def main():
         except FileExistsError:                
             logger.warning(f'Using existing RCSB downloads in {OUTPUT_DIR}')
 
-    with tqdm(total=len(codes), colour='yellow', bar_format=r'{l_bar}{bar}| {n:.0f}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]') as pbar:
-
-        for code in codes:
-
-            pbar.set_postfix_str(code)
-            
-            try:
-                pdb_file = download_pdb(code)
-                pbar.update(0.19999999)
-
-                mtz_file = download_mtz(code)
-                pbar.update(0.19999999)
-                
-                lig_code, sys = clean_pdb(pdb_file)
-                pbar.update(0.19999999)
-                
-                cif_file = download_cif(lig_code)
-                pbar.update(0.19999999)
-
-
-            except urllib.error.HTTPError as e:
-                tqdm.write(f'{mcol.error}{mcol.inverse} ERROR {mcol.uninverse} {mcol.underline}{code}{mcol.ununderline} {e} {mcol.clear}')
-                continue
-
-            cif_file = clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
-            pbar.update(0.19999999)
-
-            try:
-                matching = check_cif(cif_file, sys)
-            except ValueError as e:
-                tqdm.write(f'{mcol.error}{mcol.inverse} ERROR {mcol.uninverse} {code} {e}!{mcol.clear}')
-                continue
-            
-            if matching:
-                tqdm.write(f'{mcol.success}{mcol.inverse} SUCCESS {mcol.uninverse} {code} OK!{mcol.clear}')
-            else:
-                tqdm.write(f'{mcol.error}{mcol.inverse} ERROR {mcol.uninverse} {code} cif /= pdb !{mcol.clear}')
+    for code in logger.track(codes, total=len(codes), prefix="Scraping"):
         
-        pbar.set_postfix_str('COMPLETE')
+        try:
+            pdb_file = download_pdb(code)
+            if args.mtz:
+                mtz_file = download_mtz(code)            
+            lig_code, sys = clean_pdb(pdb_file)            
+            cif_file = download_cif(lig_code)
 
+        except urllib.error.HTTPError as e:
+            logger.error(code, e)
+            continue
+        except ValueError as e:
+            logger.error(code, e)
+            continue
+
+        cif_file = clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
+        try:
+            matching = check_cif(cif_file, sys)
+        except MolInstantiationError as e:
+            logger.error(code, e)
+            continue
+        
+        if matching:
+            logger.success(code, "OK")
+        else:
+            logger.error(code, "cif /= pdb")
+    
     if args.clean or args.clean_only:
-        logger.info('Cleaning up...')
-        for child in OUTPUT_DIR.iterdir():
-            if child.is_file():
-                if '_rcsb' in str(child):
-                    child.unlink()
+        with logger.loading('Cleaning up...'):
+            for child in OUTPUT_DIR.iterdir():
+                if child.is_file():
+                    if '_rcsb' in str(child):
+                        child.unlink()
 
     import os
-    logger.info('Zipping...')
-    os.system(f'zip {OUTPUT_DIR}/{OUTPUT_DIR.name}.zip {OUTPUT_DIR}/????.pdb {OUTPUT_DIR}/????.mtz {OUTPUT_DIR}/????.cif {OUTPUT_DIR}/????_mod.cif')
+    with logger.loading("Zipping"):
+        os.system(f'zip -q {OUTPUT_DIR}/{OUTPUT_DIR.name}.zip {OUTPUT_DIR}/????.pdb {OUTPUT_DIR}/????.mtz {OUTPUT_DIR}/????.cif {OUTPUT_DIR}/????_mod.cif')
+    
     logger.success('Done')
 
 if __name__ == '__main__':
