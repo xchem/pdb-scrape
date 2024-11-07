@@ -342,7 +342,7 @@ def main():
         try:
             matching = check_cif(cif_file, sys)
         except MolInstantiationError as e:
-            logger.error(code, e)
+            logger.warning(code, "Could not create ligand from PDB. This may cause problems later on")
             continue
 
         if matching:
