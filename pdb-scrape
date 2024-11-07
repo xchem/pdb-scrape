@@ -53,7 +53,7 @@ def download_pdb(
         try:
             urllib.request.urlretrieve(f"{RCSB_PDB_DOWNLOAD_URL}/{code}.pdb", out_file)
         except urllib.error.URLError as e:
-            logger.warning(f"Can't retrieve PDB for {code}")
+            logger.print(f"[debug]Can't retrieve PDB for {code}. Will use the mmCIF instead")
             return None
     return out_file
 
