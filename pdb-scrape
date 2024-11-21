@@ -393,7 +393,7 @@ def main():
                 continue
 
         if combi_soak:
-            logger.success(code, "OK")
+            logger.success(code, "OK (multiple ligands)")
         elif matching:
             logger.success(code, "OK")
         else:
