@@ -3,13 +3,13 @@ import mrich
 from gemmi import cif
 
 HEADER_LOOP_COLUMNS = [
-    "_chem_comp.id",
-    "_chem_comp.three_letter_code",
-    "_chem_comp.name",
-    "_chem_comp.group",
-    "_chem_comp.number_atoms_all",
-    "_chem_comp.number_atoms_nh",
-    "_chem_comp.desc_level",
+    ".id",
+    ".three_letter_code",
+    ".name",
+    ".group",
+    ".number_atoms_all",
+    ".number_atoms_nh",
+    ".desc_level",
 ]
 
 
