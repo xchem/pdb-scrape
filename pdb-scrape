@@ -53,7 +53,7 @@ def download_pdb(
         try:
             urllib.request.urlretrieve(f"{RCSB_PDB_DOWNLOAD_URL}/{code}.pdb", out_file)
         except urllib.error.URLError as e:
-            logger.print(f"[debug]Can't retrieve PDB for {code}. Will use the mmCIF instead")
+            # logger.print(f"[debug]Can't retrieve PDB for {code}. Will use the mmCIF instead")
             return None
     return out_file
 
@@ -77,6 +77,10 @@ def download_cif(
     code: str,
 ) -> Path:
 
+    if isinstance(code, dict):
+        # logger.warning(f"Downloading multiple ligand CIFs: {code}. If this is not a combi-soak dataset change -i argument")
+        return [download_cif(c) for c in code]
+
     out_file = OUTPUT_DIR / f"{code}_rcsb.cif"
     if not Path(out_file).exists():
         urllib.request.urlretrieve(f"{RCSB_CIF_DOWNLOAD_URL}/{code}.cif", out_file)
@@ -99,7 +103,20 @@ def clean_sys(sys, out_file):
 
     lig_code = extract_ligand_code(sys)
 
-    sys.rename_residues(lig_code, "LIG", verbosity=0)
+    if isinstance(lig_code, list):
+
+        code_map = {}
+        for i, code in enumerate(lig_code):
+            assert i < 9
+            new_code = f"LG{i+1}"
+            logger.print("Renaming", code, "-->", new_code)
+            sys.rename_residues(code, new_code, verbosity=0)
+            code_map[code] = new_code
+
+        lig_code = code_map
+
+    else:
+        sys.rename_residues(lig_code, "LIG", verbosity=0)
 
     # logger.writing(out_file)
     mp.write(out_file, sys, verbosity=0)
@@ -120,14 +137,12 @@ def clean_pdb(
 
 
 def clean_cif(
-    in_file: Path,
-    lig_code: str,
-    pdb_code: str,
+    in_file: Path, lig_code: str, pdb_code: str, new_code: str = "LIG"
 ) -> Path:
 
     out_file = OUTPUT_DIR / f"{pdb_code}.cif"
     buffer = in_file.read_text()
-    buffer = buffer.replace(lig_code, "LIG")
+    buffer = buffer.replace(lig_code, new_code)
     # logger.writing(out_file)
     with open(out_file, "wt") as f:
         f.write(buffer)
@@ -223,12 +238,15 @@ def extract_ligand_code(
     lig_codes = list(set([c for c in all_lig_codes if c not in ignore]))
 
     if len(lig_codes) > 1:
-        logger.error(
-            f"Multiple candidate ligands: {lig_codes}. Try setting the --ignore parameter"
+        logger.warning(
+            f"Multiple candidate ligands: {lig_codes}. If not all of these are correct adjust the --ignore parameter"
         )
-        raise ValueError(
-            f"Multiple candidate ligands: {lig_codes}. Try setting the --ignore parameter"
-        )
+
+        return lig_codes
+
+        # raise ValueError(
+        #     f"Multiple candidate ligands: {lig_codes}. Try setting the --ignore parameter"
+        # )
     elif not lig_codes:
         logger.error(
             f"No non-ignored candidate ligands: {all_lig_codes}. Try changing the --ignore parameter"
@@ -329,6 +347,7 @@ def main():
 
             if args.mtz:
                 mtz_file = download_mtz(code)
+
             cif_file = download_cif(lig_code)
 
         except urllib.error.HTTPError as e:
@@ -338,14 +357,44 @@ def main():
             logger.error(code, e)
             continue
 
-        cif_file = clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
-        try:
-            matching = check_cif(cif_file, sys)
-        except MolInstantiationError as e:
-            logger.warning(code, "Could not create ligand from PDB. This may cause problems later on")
-            continue
+        if isinstance(cif_file, list):
+            combi_soak = True
 
-        if matching:
+            files = []
+            for file, (lig_code, new_code) in zip(cif_file, lig_code.items()):
+                files.append(
+                    clean_cif(
+                        file,
+                        lig_code=lig_code,
+                        pdb_code=f"{code}_{new_code}",
+                        new_code=new_code,
+                    )
+                )
+
+            from merge_cif import merge_cifs
+
+            cif_file = merge_cifs(files, OUTPUT_DIR / f"{code}.cif")
+
+            logger.warning(
+                "Won't check PDB ligand against CIF because it's not supported for combi-soaks"
+            )
+
+        else:
+            combi_soak = False
+            cif_file = clean_cif(cif_file, lig_code=lig_code, pdb_code=code)
+
+            try:
+                matching = check_cif(cif_file, sys)
+            except MolInstantiationError as e:
+                logger.warning(
+                    code,
+                    "Could not create ligand from PDB. This may cause problems later on",
+                )
+                continue
+
+        if combi_soak:
+            logger.success(code, "OK")
+        elif matching:
             logger.success(code, "OK")
         else:
             logger.error(code, "cif /= pdb")
