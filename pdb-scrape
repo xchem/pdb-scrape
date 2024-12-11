@@ -155,8 +155,6 @@ def clean_mmcif(in_file: Path, debug: bool = False):
 
     sys = mp.parse(in_file, verbosity=0, debug=debug)
 
-    # sys.summary()
-
     return clean_sys(sys, out_file)
 
 
