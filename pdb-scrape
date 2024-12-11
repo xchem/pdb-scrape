@@ -14,7 +14,7 @@ import mcol
 import mrich as logger
 
 OUTPUT_DIR = "output"
-IGNORE_RESIDUES = "ZN EDO MPD DMS PEG ETG PO4"
+IGNORE_RESIDUES = "ZN EDO MPD DMS PEG ETG PO4 CL"
 REMOVE_RESIDUES = ""
 
 RCSB_PDB_DOWNLOAD_URL = "http://files.rcsb.org/download/"
@@ -149,11 +149,13 @@ def clean_cif(
     return out_file
 
 
-def clean_mmcif(in_file: Path):
+def clean_mmcif(in_file: Path, debug: bool = False):
 
     out_file = str(in_file).replace("_rcsb_mmCIF.cif", ".pdb")
 
-    sys = mp.parse(in_file, verbosity=0)
+    sys = mp.parse(in_file, verbosity=0, debug=debug)
+
+    # sys.summary()
 
     return clean_sys(sys, out_file)
 
@@ -220,14 +222,15 @@ def extract_ligand_code(
     sys: mp.System,
 ) -> str:
 
+    all_lig_codes = None
+
     if sys._header_data:
 
         hetnam_lines = [s for s in sys._header_data if s.startswith("HETNAM")]
 
         all_lig_codes = [l[11:].split()[0] for l in hetnam_lines]
 
-    else:
-
+    if not all_lig_codes:
         all_lig_codes = list(set(r.name for r in sys.residues if r.type == "LIG"))
 
     if IGNORE_RESIDUES:

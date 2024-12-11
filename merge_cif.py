@@ -31,7 +31,8 @@ def merge_cifs(infiles: Path, outfile: Path):  # , code_map: dict[str,str]):
 
     for doc in indocs:
         block = doc.sole_block()
-        new_block = outdoc.add_new_block(block.name)
+        new_name = f"comp_{block.name}"
+        new_block = outdoc.add_new_block(new_name)
 
         for item in block:  # This iterates through all data in the block
             new_block.add_item(item)
